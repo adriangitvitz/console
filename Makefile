@@ -33,6 +33,10 @@ lint:
 	@GO111MODULE=on ${GOPATH}/bin/golangci-lint cache clean
 	@GO111MODULE=on ${GOPATH}/bin/golangci-lint run --timeout=5m --config ./.golangci.yml
 
+lint-fix: getdeps ## runs golangci-lint suite of linters with automatic fixes
+	@echo "Running $@ check"
+	@GO111MODULE=on ${GOPATH}/bin/golangci-lint run --timeout=5m --config ./.golangci.yml --fix
+
 install: console
 	@echo "Installing console binary to '$(GOPATH)/bin/console'"
 	@mkdir -p $(GOPATH)/bin && cp -f $(PWD)/console $(GOPATH)/bin/console
@@ -48,19 +52,19 @@ apply-gofmt:
 clean-swagger:
 	@echo "cleaning"
 	@rm -rf models
-	@rm -rf restapi/operations
+	@rm -rf api/operations
 
 swagger-console:
 	@echo "Generating swagger server code from yaml"
-	@swagger generate server -A console --main-package=management --server-package=restapi --exclude-main -P models.Principal -f ./swagger.yml -r NOTICE
+	@swagger generate server -A console --main-package=management --server-package=api --exclude-main -P models.Principal -f ./swagger.yml -r NOTICE
 	@echo "Generating typescript api"
-	@npx swagger-typescript-api -p ./swagger.yml -o ./portal-ui/src/api -n consoleApi.ts
-	@git restore restapi/server.go
+	@npx swagger-typescript-api -p ./swagger.yml -o ./web-app/src/api -n consoleApi.ts --custom-config generator.config.js
+	@git restore api/server.go
 
 
 assets:
 	@(if [ -f "${NVM_DIR}/nvm.sh" ]; then \. "${NVM_DIR}/nvm.sh" && nvm install && nvm use && npm install -g yarn ; fi &&\
-	  cd portal-ui; yarn install --prefer-offline; make build-static; yarn prettier --write . --loglevel warn; cd ..)
+	  cd web-app; corepack enable; yarn install --prefer-offline; make build-static; yarn prettier --write . --loglevel warn; cd ..)
 
 test-integration:
 	@(docker stop pgsqlcontainer || true)
@@ -78,7 +82,7 @@ test-integration:
 	@echo "Postgres"
 	@(docker run --net=mynet123 --ip=173.18.0.4 --name pgsqlcontainer --rm -p 5432:5432 -e POSTGRES_PASSWORD=password -d postgres && sleep 5)
 	@echo "execute test and get coverage for test-integration:"
-	@(cd integration && go test -coverpkg=../restapi -c -tags testrunmain . && mkdir -p coverage &&  ./integration.test -test.v -test.run "^Test*" -test.coverprofile=coverage/system.out)
+	@(cd integration && go test -coverpkg=../api -c -tags testrunmain . && mkdir -p coverage &&  ./integration.test -test.v -test.run "^Test*" -test.coverprofile=coverage/system.out)
 	@(docker stop pgsqlcontainer)
 	@(docker stop minio)
 	@(docker stop minio2)
@@ -126,7 +130,7 @@ test-replication:
 	  $(MINIO_VERSION) server /data{1...4} \
 	  --address :9002 \
 	  --console-address :6002)
-	@(cd replication && go test -coverpkg=../restapi -c -tags testrunmain . && mkdir -p coverage && ./replication.test -test.v -test.run "^Test*" -test.coverprofile=coverage/replication.out)
+	@(cd replication && go test -coverpkg=../api -c -tags testrunmain . && mkdir -p coverage && ./replication.test -test.v -test.run "^Test*" -test.coverprofile=coverage/replication.out)
 	@(docker stop minio || true)
 	@(docker stop minio1 || true)
 	@(docker stop minio2 || true)
@@ -180,45 +184,40 @@ test-sso-integration:
 	@echo "add python module"
 	@(pip3 install bs4)
 	@echo "Executing the test:"
-	@(cd sso-integration && go test -coverpkg=../restapi -c -tags testrunmain . && mkdir -p coverage && ./sso-integration.test -test.v -test.run "^Test*" -test.coverprofile=coverage/sso-system.out)
+	@(cd sso-integration && go test -coverpkg=../api -c -tags testrunmain . && mkdir -p coverage && ./sso-integration.test -test.v -test.run "^Test*" -test.coverprofile=coverage/sso-system.out)
 
 test-permissions-1:
 	@(docker run -v /data1 -v /data2 -v /data3 -v /data4 -d --name minio --rm -p 9000:9000 quay.io/minio/minio:latest server /data{1...4})
-	@(env bash $(PWD)/portal-ui/tests/scripts/permissions.sh "portal-ui/tests/permissions-1/")
+	@(env bash $(PWD)/web-app/tests/scripts/permissions.sh "web-app/tests/permissions-1/")
 	@(docker stop minio)
 
 test-permissions-2:
 	@(docker run -v /data1 -v /data2 -v /data3 -v /data4 -d --name minio --rm -p 9000:9000 quay.io/minio/minio:latest server /data{1...4})
-	@(env bash $(PWD)/portal-ui/tests/scripts/permissions.sh "portal-ui/tests/permissions-2/")
+	@(env bash $(PWD)/web-app/tests/scripts/permissions.sh "web-app/tests/permissions-2/")
 	@(docker stop minio)
 
 test-permissions-3:
 	@(docker run -v /data1 -v /data2 -v /data3 -v /data4 -d --name minio --rm -p 9000:9000 quay.io/minio/minio:latest server /data{1...4})
-	@(env bash $(PWD)/portal-ui/tests/scripts/permissions.sh "portal-ui/tests/permissions-3/")
+	@(env bash $(PWD)/web-app/tests/scripts/permissions.sh "web-app/tests/permissions-3/")
 	@(docker stop minio)
 
 test-permissions-4:
 	@(docker run -v /data1 -v /data2 -v /data3 -v /data4 -d --name minio --rm -p 9000:9000 quay.io/minio/minio:latest server /data{1...4})
-	@(env bash $(PWD)/portal-ui/tests/scripts/permissions.sh "portal-ui/tests/permissions-4/")
+	@(env bash $(PWD)/web-app/tests/scripts/permissions.sh "web-app/tests/permissions-4/")
 	@(docker stop minio)
 
 test-permissions-5:
 	@(docker run -v /data1 -v /data2 -v /data3 -v /data4 -d --name minio --rm -p 9000:9000 quay.io/minio/minio:latest server /data{1...4})
-	@(env bash $(PWD)/portal-ui/tests/scripts/permissions.sh "portal-ui/tests/permissions-5/")
+	@(env bash $(PWD)/web-app/tests/scripts/permissions.sh "web-app/tests/permissions-5/")
 	@(docker stop minio)
 
 test-permissions-6:
 	@(docker run -v /data1 -v /data2 -v /data3 -v /data4 -d --name minio --rm -p 9000:9000 quay.io/minio/minio:latest server /data{1...4})
-	@(env bash $(PWD)/portal-ui/tests/scripts/permissions.sh "portal-ui/tests/permissions-6/")
-	@(docker stop minio)
-
-test-permissions-7:
-	@(docker run -v /data1 -v /data2 -v /data3 -v /data4 -d --name minio --rm -p 9000:9000 quay.io/minio/minio:latest server /data{1...4})
-	@(env bash $(PWD)/portal-ui/tests/scripts/permissions.sh "portal-ui/tests/permissions-7/")
+	@(env bash $(PWD)/web-app/tests/scripts/permissions.sh "web-app/tests/permissions-6/")
 	@(docker stop minio)
 
 test-apply-permissions:
-	@(env bash $(PWD)/portal-ui/tests/scripts/initialize-env.sh)
+	@(env bash $(PWD)/web-app/tests/scripts/initialize-env.sh)
 
 test-start-docker-minio:
 	@(docker run -v /data1 -v /data2 -v /data3 -v /data4 -d --name minio --rm -p 9000:9000 quay.io/minio/minio:latest server /data{1...4})
@@ -227,7 +226,7 @@ initialize-permissions: test-start-docker-minio test-apply-permissions
 	@echo "Done initializing permissions test"
 
 cleanup-permissions:
-	@(env bash $(PWD)/portal-ui/tests/scripts/cleanup-env.sh)
+	@(env bash $(PWD)/web-app/tests/scripts/cleanup-env.sh)
 	@(docker stop minio)
 
 initialize-docker-network:
@@ -239,14 +238,14 @@ test-start-docker-minio-w-redirect-url: initialize-docker-network
     -e MINIO_SERVER_URL='http://localhost:9000' \
     -v /data1 -v /data2 -v /data3 -v /data4 \
     -d --network host --name minio --rm\
-    quay.io/minio/minio:latest server /data{1...4}) 
+    quay.io/minio/minio:latest server /data{1...4})
 
 test-start-docker-nginx-w-subpath:
 	@(docker run \
 	--network host \
 	-d --rm \
 	--add-host=host.docker.internal:host-gateway \
-	-v ./portal-ui/tests/subpath-nginx/nginx.conf:/etc/nginx/nginx.conf \
+	-v ./web-app/tests/subpath-nginx/nginx.conf:/etc/nginx/nginx.conf \
 	--name test-nginx nginx)
 
 test-initialize-minio-nginx: test-start-docker-minio-w-redirect-url test-start-docker-nginx-w-subpath
@@ -254,17 +253,23 @@ test-initialize-minio-nginx: test-start-docker-minio-w-redirect-url test-start-d
 cleanup-minio-nginx:
 	@(docker stop minio test-nginx & docker network rm test-network)
 
+# https://stackoverflow.com/questions/19200235/golang-tests-in-sub-directory
+# Note: go test ./... will run tests on the current folder and all subfolders.
+# This is needed because tests can be in the folder or sub-folder(s), let's include them all please!.
 test:
 	@echo "execute test and get coverage"
-	@(cd restapi && mkdir coverage && GO111MODULE=on go test -test.v -coverprofile=coverage/coverage.out)
+	@(cd api && mkdir -p coverage && GO111MODULE=on go test ./... -test.v -coverprofile=coverage/coverage.out)
 
 
+# https://stackoverflow.com/questions/19200235/golang-tests-in-sub-directory
+# Note: go test ./... will run tests on the current folder and all subfolders.
+# This is since tests in pkg folder are in subfolders and were not executed.
 test-pkg:
 	@echo "execute test and get coverage"
-	@(cd pkg && mkdir coverage && GO111MODULE=on go test -test.v -coverprofile=coverage/coverage-pkg.out)
+	@(cd pkg && mkdir -p coverage && GO111MODULE=on go test ./... -test.v -coverprofile=coverage/coverage-pkg.out)
 
 coverage:
-	@(GO111MODULE=on go test -v -coverprofile=coverage.out github.com/minio/console/restapi/... && go tool cover -html=coverage.out && open coverage.html)
+	@(GO111MODULE=on go test -v -coverprofile=coverage.out github.com/minio/console/api/... && go tool cover -html=coverage.out && open coverage.html)
 
 clean:
 	@echo "Cleaning up all the generated files"
@@ -279,4 +284,4 @@ release: swagger-gen
 	@echo "Generating Release: $(RELEASE)"
 	@make assets
 	@git add -u .
-	@git add portal-ui/build/
+	@git add web-app/build/

@@ -25,9 +25,9 @@ import (
 
 	"github.com/minio/cli"
 	"github.com/minio/console/pkg"
-	"github.com/minio/pkg/v2/console"
-	"github.com/minio/pkg/v2/trie"
-	"github.com/minio/pkg/v2/words"
+	"github.com/minio/pkg/v3/console"
+	"github.com/minio/pkg/v3/trie"
+	"github.com/minio/pkg/v3/words"
 )
 
 // Help template for Console.
@@ -105,7 +105,7 @@ func newApp(name string) *cli.App {
 	app.Commands = commands
 	app.HideHelpCommand = true // Hide `help, h` command, we already have `minio --help`.
 	app.CustomAppHelpTemplate = consoleHelpTemplate
-	app.CommandNotFound = func(ctx *cli.Context, command string) {
+	app.CommandNotFound = func(_ *cli.Context, command string) {
 		console.Printf("‘%s’ is not a console sub-command. See ‘console --help’.\n", command)
 		closestCommands := findClosestCommands(command)
 		if len(closestCommands) > 0 {

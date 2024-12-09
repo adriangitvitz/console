@@ -1,7 +1,0 @@
-node_modules/
-dist/
-target/
-console
-!console/
-portal-ui/node_modules/
-.git/

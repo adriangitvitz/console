@@ -18,11 +18,11 @@ package integration
 
 import (
 	"bytes"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
+	"net/url"
 	"testing"
 	"time"
 
@@ -65,7 +65,7 @@ func Test_AddGroupAPI(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.name, func(_ *testing.T) {
 			client := &http.Client{
 				Timeout: 3 * time.Second,
 			}
@@ -114,7 +114,7 @@ func Test_GetGroupAPI(t *testing.T) {
 		{
 			name: "Get Group - Valid",
 			args: args{
-				api: base64.StdEncoding.EncodeToString([]byte("getgroup1")),
+				api: "getgroup1",
 			},
 			expectedStatus: 200,
 			expectedError:  nil,
@@ -122,7 +122,7 @@ func Test_GetGroupAPI(t *testing.T) {
 		{
 			name: "Get Group - Invalid",
 			args: args{
-				api: base64.StdEncoding.EncodeToString([]byte("askfjalkd")),
+				api: "askfjalkd",
 			},
 			expectedStatus: 500,
 			expectedError:  nil,
@@ -130,7 +130,7 @@ func Test_GetGroupAPI(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.name, func(_ *testing.T) {
 			client := &http.Client{
 				Timeout: 3 * time.Second,
 			}
@@ -140,7 +140,7 @@ func Test_GetGroupAPI(t *testing.T) {
 			requestDataJSON, _ := json.Marshal(requestDataPolicy)
 			requestDataBody := bytes.NewReader(requestDataJSON)
 			request, err := http.NewRequest(
-				"GET", fmt.Sprintf("http://localhost:9090/api/v1/group/%s", tt.args.api), requestDataBody)
+				"GET", fmt.Sprintf("http://localhost:9090/api/v1/group/%s", url.PathEscape(tt.args.api)), requestDataBody)
 			if err != nil {
 				log.Println(err)
 				return
@@ -175,7 +175,7 @@ func Test_ListGroupsAPI(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.name, func(_ *testing.T) {
 			client := &http.Client{
 				Timeout: 3 * time.Second,
 			}
@@ -224,7 +224,7 @@ func Test_PutGroupsAPI(t *testing.T) {
 		{
 			name: "Put Group - Valid",
 			args: args{
-				api:     base64.StdEncoding.EncodeToString([]byte("putgroup1")),
+				api:     "putgroup1",
 				members: []string{"member3"},
 				status:  "enabled",
 			},
@@ -234,7 +234,7 @@ func Test_PutGroupsAPI(t *testing.T) {
 		{
 			name: "Put Group - Invalid",
 			args: args{
-				api:     base64.StdEncoding.EncodeToString([]byte("gdgfdfgd")),
+				api:     "gdgfdfgd",
 				members: []string{"member3"},
 				status:  "enabled",
 			},
@@ -244,7 +244,7 @@ func Test_PutGroupsAPI(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.name, func(_ *testing.T) {
 			client := &http.Client{
 				Timeout: 3 * time.Second,
 			}
@@ -257,7 +257,7 @@ func Test_PutGroupsAPI(t *testing.T) {
 			requestDataJSON, _ := json.Marshal(requestDataPolicy)
 			requestDataBody := bytes.NewReader(requestDataJSON)
 			request, err := http.NewRequest(
-				"PUT", fmt.Sprintf("http://localhost:9090/api/v1/group/%s", tt.args.api), requestDataBody)
+				"PUT", fmt.Sprintf("http://localhost:9090/api/v1/group/%s", url.PathEscape(tt.args.api)), requestDataBody)
 			if err != nil {
 				log.Println(err)
 				return
@@ -294,7 +294,7 @@ func Test_DeleteGroupAPI(t *testing.T) {
 		{
 			name: "Delete Group - Valid",
 			args: args{
-				api: base64.StdEncoding.EncodeToString([]byte("grouptests1")),
+				api: "grouptests1",
 			},
 			verb:           "DELETE",
 			expectedStatus: 204,
@@ -303,7 +303,7 @@ func Test_DeleteGroupAPI(t *testing.T) {
 		{
 			name: "Delete Group - Invalid",
 			args: args{
-				api: base64.StdEncoding.EncodeToString([]byte("grouptests12345")),
+				api: "grouptests12345",
 			},
 			verb:           "DELETE",
 			expectedStatus: 404,
@@ -312,7 +312,7 @@ func Test_DeleteGroupAPI(t *testing.T) {
 		{
 			name: "Access Group After Delete - Invalid",
 			args: args{
-				api: base64.StdEncoding.EncodeToString([]byte("grouptests1")),
+				api: "grouptests1",
 			},
 			verb:           "GET",
 			expectedStatus: 500,
@@ -321,7 +321,7 @@ func Test_DeleteGroupAPI(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.name, func(_ *testing.T) {
 			client := &http.Client{
 				Timeout: 3 * time.Second,
 			}
@@ -331,7 +331,7 @@ func Test_DeleteGroupAPI(t *testing.T) {
 			requestDataJSON, _ := json.Marshal(requestDataPolicy)
 			requestDataBody := bytes.NewReader(requestDataJSON)
 			request, err := http.NewRequest(
-				tt.verb, fmt.Sprintf("http://localhost:9090/api/v1/group/%s", tt.args.api), requestDataBody)
+				tt.verb, fmt.Sprintf("http://localhost:9090/api/v1/group/%s", url.PathEscape(tt.args.api)), requestDataBody)
 			if err != nil {
 				log.Println(err)
 				return

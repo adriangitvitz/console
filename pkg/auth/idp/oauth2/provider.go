@@ -32,7 +32,7 @@ import (
 	"github.com/minio/console/pkg/auth/utils"
 	"github.com/minio/minio-go/v7/pkg/credentials"
 	"github.com/minio/minio-go/v7/pkg/set"
-	"github.com/minio/pkg/v2/env"
+	"github.com/minio/pkg/v3/env"
 	"golang.org/x/crypto/pbkdf2"
 	"golang.org/x/oauth2"
 	xoauth2 "golang.org/x/oauth2"
@@ -109,11 +109,10 @@ type Provider struct {
 	// - Scopes specifies optional requested permissions.
 	IDPName string
 	// if enabled means that we need extrace access_token as well
-	UserInfo       bool
-	RefreshToken   string
-	oauth2Config   Configuration
-	provHTTPClient *http.Client
-	stsHTTPClient  *http.Client
+	UserInfo     bool
+	RefreshToken string
+	oauth2Config Configuration
+	client       *http.Client
 }
 
 // DefaultDerivedKey is the key used to compute the HMAC for signing the oauth state parameter
@@ -154,7 +153,7 @@ var requiredResponseTypes = set.CreateStringSet("code")
 // We only support Authentication with the Authorization Code Flow - spec:
 // https://openid.net/specs/openid-connect-core-1_0.html#CodeFlowAuth
 func NewOauth2ProviderClient(scopes []string, r *http.Request, httpClient *http.Client) (*Provider, error) {
-	ddoc, err := parseDiscoveryDoc(GetIDPURL(), httpClient)
+	ddoc, err := parseDiscoveryDoc(r.Context(), GetIDPURL(), httpClient)
 	if err != nil {
 		return nil, err
 	}
@@ -204,12 +203,21 @@ func NewOauth2ProviderClient(scopes []string, r *http.Request, httpClient *http.
 
 	client.IDPName = GetIDPClientID()
 	client.UserInfo = GetIDPUserInfo()
-	client.provHTTPClient = httpClient
+	client.client = httpClient
 
 	return client, nil
 }
 
 var defaultScopes = []string{"openid", "profile", "email"}
+
+// NewOauth2ProviderClientByName returns a provider if present specified by the input name of the provider.
+func (ois OpenIDPCfg) NewOauth2ProviderClientByName(name string, scopes []string, r *http.Request, clnt *http.Client) (provider *Provider, err error) {
+	oi, ok := ois[name]
+	if !ok {
+		return nil, fmt.Errorf("%s IDP provider does not exist", name)
+	}
+	return oi.GetOauth2Provider(name, scopes, r, clnt)
+}
 
 // NewOauth2ProviderClient instantiates a new oauth2 client using the
 // `OpenIDPCfg` configuration struct. It returns a *Provider object that
@@ -218,70 +226,18 @@ var defaultScopes = []string{"openid", "profile", "email"}
 //
 // We only support Authentication with the Authorization Code Flow - spec:
 // https://openid.net/specs/openid-connect-core-1_0.html#CodeFlowAuth
-func (o OpenIDPCfg) NewOauth2ProviderClient(name string, scopes []string, r *http.Request, idpClient, stsClient *http.Client) (*Provider, error) {
-	ddoc, err := parseDiscoveryDoc(o[name].URL, idpClient)
-	if err != nil {
-		return nil, err
-	}
-
-	supportedResponseTypes := set.NewStringSet()
-	for _, responseType := range ddoc.ResponseTypesSupported {
-		// FIXME: ResponseTypesSupported is a JSON array of strings - it
-		// may not actually have strings with spaces inside them -
-		// making the following code unnecessary.
-		for _, s := range strings.Fields(responseType) {
-			supportedResponseTypes.Add(s)
+func (ois OpenIDPCfg) NewOauth2ProviderClient(scopes []string, r *http.Request, clnt *http.Client) (provider *Provider, providerCfg ProviderConfig, err error) {
+	for name, oi := range ois {
+		provider, err = oi.GetOauth2Provider(name, scopes, r, clnt)
+		if err != nil {
+			// Upon error look for the next IDP.
+			continue
 		}
+		// Upon success return right away.
+		providerCfg = oi
+		break
 	}
-	isSupported := requiredResponseTypes.Difference(supportedResponseTypes).IsEmpty()
-
-	if !isSupported {
-		return nil, fmt.Errorf("expected 'code' response type - got %s, login not allowed", ddoc.ResponseTypesSupported)
-	}
-
-	// If provided scopes are empty we use the user configured list or a default
-	// list.
-	if len(scopes) == 0 {
-		scopesTmp := strings.Split(o[name].Scopes, ",")
-		for _, s := range scopesTmp {
-			w := strings.TrimSpace(s)
-			if w != "" {
-				scopes = append(scopes, w)
-			}
-		}
-		if len(scopes) == 0 {
-			scopes = defaultScopes
-		}
-	}
-
-	redirectURL := o[name].RedirectCallback
-	if o[name].RedirectCallbackDynamic {
-		// dynamic redirect if set, will generate redirect URLs
-		// dynamically based on incoming requests.
-		redirectURL = getLoginCallbackURL(r)
-	}
-
-	// add "openid" scope always.
-	scopes = append(scopes, "openid")
-
-	client := new(Provider)
-	client.oauth2Config = &xoauth2.Config{
-		ClientID:     o[name].ClientID,
-		ClientSecret: o[name].ClientSecret,
-		RedirectURL:  redirectURL,
-		Endpoint: oauth2.Endpoint{
-			AuthURL:  ddoc.AuthEndpoint,
-			TokenURL: ddoc.TokenEndpoint,
-		},
-		Scopes: scopes,
-	}
-
-	client.IDPName = name
-	client.UserInfo = o[name].Userinfo
-
-	client.provHTTPClient = idpClient
-	client.stsHTTPClient = stsClient
-	return client, nil
+	return provider, providerCfg, err
 }
 
 type User struct {
@@ -321,7 +277,7 @@ func (client *Provider) VerifyIdentity(ctx context.Context, code, state, roleARN
 		return nil, err
 	}
 	getWebTokenExpiry := func() (*credentials.WebIdentityToken, error) {
-		customCtx := context.WithValue(ctx, oauth2.HTTPClient, client.provHTTPClient)
+		customCtx := context.WithValue(ctx, oauth2.HTTPClient, client.client)
 		oauth2Token, err := client.oauth2Config.Exchange(customCtx, code)
 		if err != nil {
 			return nil, err
@@ -365,13 +321,22 @@ func (client *Provider) VerifyIdentity(ctx context.Context, code, state, roleARN
 				return nil, errors.New("missing access_token")
 			}
 			token.AccessToken = accessToken.(string)
+			refreshToken := oauth2Token.Extra("refresh_token")
+			if refreshToken != nil {
+				token.RefreshToken = refreshToken.(string)
+			} else { //nolint:revive,staticcheck
+				// TODO in Nov 2026 : add an error when the refresh token is not found.
+				// This is not done yet because users may not have access_offline scope
+				// and this may break their deployments
+			}
+
 		}
 		return token, nil
 	}
 	stsEndpoint := GetSTSEndpoint()
 
 	sts := credentials.New(&credentials.STSWebIdentity{
-		Client:              client.stsHTTPClient,
+		Client:              client.client,
 		STSEndpoint:         stsEndpoint,
 		GetWebIDTokenExpiry: getWebTokenExpiry,
 		RoleARN:             roleARN,
@@ -385,7 +350,7 @@ func (client *Provider) VerifyIdentityForOperator(ctx context.Context, code, sta
 	if err := validateOauth2State(state, keyFunc); err != nil {
 		return nil, err
 	}
-	customCtx := context.WithValue(ctx, oauth2.HTTPClient, client.provHTTPClient)
+	customCtx := context.WithValue(ctx, oauth2.HTTPClient, client.client)
 	oauth2Token, err := client.oauth2Config.Exchange(customCtx, code)
 	if err != nil {
 		return nil, err
@@ -427,9 +392,9 @@ func validateOauth2State(state string, keyFunc StateKeyFunc) error {
 
 // parseDiscoveryDoc parses a discovery doc from an OAuth provider
 // into a DiscoveryDoc struct that have the correct endpoints
-func parseDiscoveryDoc(ustr string, httpClient *http.Client) (DiscoveryDoc, error) {
+func parseDiscoveryDoc(ctx context.Context, ustr string, httpClient *http.Client) (DiscoveryDoc, error) {
 	d := DiscoveryDoc{}
-	req, err := http.NewRequest(http.MethodGet, ustr, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, ustr, nil)
 	if err != nil {
 		return d, err
 	}
